@@ -1,73 +1,84 @@
-from sage.all import *
+"""Regenerate PD codes for the 1,783-name knot catalog with SageMath."""
 
-import os
-import functools
+from ast import literal_eval
+from functools import cache
+from pathlib import Path
 
-dirnow = os.path.dirname(os.path.abspath(__file__))
 
-# 获取小于等于 11 crossing 的所有扭结名称
-@functools.cache
-def get_knot_name_list() -> list:
-    hom_file = os.path.join(dirnow, "HOMFLY-PT-reg.txt")
-    arr = []
-    for line in open(hom_file):
-        arr.append(line.strip().split("|")[-1][:-1])
-    return arr
+HERE = Path(__file__).resolve().parent
+NAME_FILE = HERE / "HOMFLY-PT-reg.txt"
+PRIME_PD_FILE = HERE / "pd_code_list.txt"
+OUTPUT_FILE = HERE / "com_pd_code_list.txt"
 
-# 获取完整的 pd_code 信息文件
-@functools.cache
-def get_pd_code_list_file() -> list:
-    pd_code_file = os.path.join(dirnow, "pd_code_list.txt")
-    arr = []
-    for line in open(pd_code_file):
-        arr.append(line.strip())
-    return arr
 
-# 计算扭结连通和
-def get_connected_sum(pd_code_1: list, pd_code_2: list) -> str:
-    k1 = Knot(pd_code_1)
-    k2 = Knot(pd_code_2)
-    return  k1.connected_sum(k2).pd_code()
+@cache
+def get_knot_name_list() -> list[str]:
+    names: list[str] = []
+    for line in NAME_FILE.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped:
+            names.append(stripped[1:-1].rsplit("|", 1)[1])
+    return names
 
-# 计算扭结的镜像扭结
-def get_mirror_code(pd_code):
-    return Knot(pd_code).mirror_image().pd_code()
 
-# 根据扭结名称获取扭结 pd_code
-@functools.cache
+@cache
+def get_prime_pd_codes() -> dict[str, list[list[int]]]:
+    result: dict[str, list[list[int]]] = {}
+    for line in PRIME_PD_FILE.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        name, raw_pd = stripped[1:-1].split("|", 1)
+        value = literal_eval(raw_pd)
+        if not isinstance(value, list):
+            raise ValueError(f"PD code for {name} is not a list")
+        result[name] = value
+    return result
+
+
+def _knot(pd_code: list[list[int]]):
+    from sage.all import Knot
+
+    return Knot(pd_code)
+
+
+def get_connected_sum(pd_code_1: list, pd_code_2: list) -> list:
+    return _knot(pd_code_1).connected_sum(_knot(pd_code_2)).pd_code()
+
+
+def get_mirror_code(pd_code: list) -> list:
+    return _knot(pd_code).mirror_image().pd_code()
+
+
+@cache
 def get_pd_code_by_prime_knot_name(knot_name: str) -> list:
-    assert knot_name.find(",") == -1 # 必须是素扭结
-    mirror = False
-    if knot_name.startswith("m"):
-        mirror = True
-        knot_name = knot_name[1:]
-    ans = None
-    for line in get_pd_code_list_file():
-        if line.startswith("[%s|" % knot_name):
-            ans = eval(line.split("|")[-1][:-1])
-            break
-    ans = get_mirror_code(ans) if mirror else ans # 计算镜像
-    return ans
+    if "," in knot_name:
+        raise ValueError("expected a prime knot name")
+    mirrored = knot_name.startswith("m")
+    base_name = knot_name[1:] if mirrored else knot_name
+    try:
+        pd_code = get_prime_pd_codes()[base_name]
+    except KeyError as exc:
+        raise KeyError(f"no prime PD code for {base_name}") from exc
+    return get_mirror_code(pd_code) if mirrored else pd_code
 
-# 根据非素扭结或者素扭结名称确定扭结 pd_code
+
 def get_pd_code_by_knot_name(knot_name: str) -> list:
-    pd_arr = []
-    knot_name_list = knot_name.split(",")
-    for sub_name in knot_name_list:
-        pd_arr.append(get_pd_code_by_prime_knot_name(sub_name))
-    for i in range(1, len(knot_name_list)):
-        pd_arr[0] = get_connected_sum(pd_arr[0], pd_arr[i])
-    return pd_arr[0]
+    components = [part.strip() for part in knot_name.split(",")]
+    if not components or any(not part for part in components):
+        raise ValueError("knot name contains an empty component")
+    result = get_pd_code_by_prime_knot_name(components[0])
+    for component in components[1:]:
+        result = get_connected_sum(result, get_pd_code_by_prime_knot_name(component))
+    return result
 
-# 获取扭结 pd_code 列表
-@functools.cache
-def get_pd_code_list_for_all_knot() -> str:
-    arr = ""
-    for knot_name in get_knot_name_list():
-        arr += "[%s|%s]\n" % (knot_name, str(get_pd_code_by_knot_name(knot_name)))
-    return arr
+
+def get_pd_code_list_for_all_knots() -> str:
+    return "".join(
+        f"[{name}|{get_pd_code_by_knot_name(name)}]\n"
+        for name in get_knot_name_list()
+    )
+
 
 if __name__ == "__main__":
-    fp = open("com_pd_code_list.txt", "w")
-    fp.write(get_pd_code_list_for_all_knot())
-    fp.close()
+    OUTPUT_FILE.write_text(get_pd_code_list_for_all_knots(), encoding="utf-8")
