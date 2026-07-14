@@ -39,3 +39,16 @@ split once from the left because the PD expression contains no pipe symbols.
 
 MIT. See `LICENSE`.
 
+## Citation
+
+If you use this repository in academic work, please cite it as:
+
+```bibtex
+@software{topologicalknotindexer_com_pd_code_list,
+  author = {{TopologicalKnotIndexer contributors}},
+  title = {{com\_pd\_code\_list}},
+  year = {2026},
+  url = {https://github.com/TopologicalKnotIndexer/com_pd_code_list}
+}
+```
+
